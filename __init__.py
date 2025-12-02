@@ -6,10 +6,13 @@ YooperNet - A package for handling data from the YooperNet observatories.
 
 from datetime import datetime
 
+from spacepy import plot
+from scipy import signal
 import numpy as np
 import h5py
 import matplotlib.pyplot as plt
 
+plot.style()
 
 # String for time conversion:
 timefmt = '%Y_%m_%d_%H_%M_%S'
@@ -57,7 +60,7 @@ class YooperData(dict):
         sensitivity = 1000 / (0.3671 * self.cycle_count + 1.5)
         self['b'] *= sensitivity
 
-    def rotate_mag(self, debug=True):
+    def rotate_mag(self, istart=0, downsample=7, debug=True):
         '''Rotate field to correct orientation in magnetic coordinates.'''
 
         # Get target values from station info:
@@ -65,9 +68,9 @@ class YooperData(dict):
         Z = info['bz0']
 
         # Start by getting median field values:
-        x_obs = np.median(self['b'][:, 0])
-        y_obs = np.median(self['b'][:, 1])
-        z_obs = np.median(self['b'][:, 2])
+        x_obs = np.median(self['b'][istart:, 0])
+        y_obs = np.median(self['b'][istart:, 1])
+        z_obs = np.median(self['b'][istart:, 2])
         b = np.sqrt(x_obs**2 + y_obs**2 + z_obs**2)
 
         # Get declination adjustment:
@@ -85,12 +88,12 @@ class YooperData(dict):
         self['bx'] = bx_1*np.cos(inc) - self['b'][:, 2]*np.sin(inc)
         self['bz'] = bx_1*np.sin(inc) + self['b'][:, 2]*np.cos(inc)
 
-        # Flip sign:
-        # self['bx'] *= -1
-        # self['bz'] *= -1
+        if downsample > 0:
+            for x in 'xyz':
+                self[f'b{x}'] = signal.medfilt(self[f'b{x}'], downsample)
 
         if not debug:
-            return
+            return None
 
         b_final = np.median(np.sqrt(self['bx']**2 +
                                     self['by']**2 +
@@ -106,11 +109,15 @@ class YooperData(dict):
               f'{self["by"].mean():8.1f}\t{self["bz"].mean():8.1f}')
 
         # Create a nice figure:
-        fig, axes = plt.subplots(3, 1, figsize=[8, 6])
+        fig, axes = plt.subplots(3, 1, figsize=[8, 6], sharex=True)
         for x, b0, ax in zip('xyz', [H, 0, Z], axes):
             ax.plot(self['time'], self[f'b{x}'])
             ax.set_ylabel(f'$B_{x}$ ($nT$)')
-            ax.hlines(b0, self['time'][0], self['time'][-1])
+            ax.hlines(b0, self['time'][0], self['time'][-1],
+                      colors='k', linestyles='--')
+        plot.applySmartTimeTicks(axes[-1], self['time'], dolabel=True)
+
+        return fig
 
     def show_image(self, index=0, **kwargs):
         '''
